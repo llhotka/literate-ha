@@ -1,4 +1,4 @@
-# MyBox integration to Home Assistant via MQTT
+# Literate Home Assistant Configurations
 
 This repository contains subdirectories with various [Home
 Assistant](https://www.home-assistant.io) projects documented in
@@ -37,8 +37,8 @@ Org files can also be viewed directly in the GitHub repo.
 
 ## Projects
 
-`mybox-ha-mqtt`
-: Configuration of MQTT-based sensors and scripts that can be used for
+* [mybox-ha-mqtt](https://github.com/llhotka/literate-ha/tree/main/mybox-ha-mqtt):
+Configuration of MQTT-based sensors and scripts that can be used for
 integrating a
 [MyBox](https://mybox.eco/produkty-kategorie/nabijeci-stanice) wallbox
 to Home Assistant. See also this [blog

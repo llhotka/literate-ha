@@ -1,6 +1,6 @@
 #+TITLE: Home Assistant definitions for MyBox wallbox
 
-This document contains annotated YAML definitions for monitoring and controlling a [[https://mybox.eco/produkty-kategorie/nabijeci-stanice/][MyBox]] wallbox in Home Assistant.
+This document contains annotated YAML definitions for monitoring and controlling a [[https://mybox.eco/produkty-kategorie/nabijeci-stanice/][MyBox]] wallbox in Home Assistant. Details can be found in this [[https://blog.lhotka.name/posts/mybox-home-assistant/][blog post]].
 
 The generated YAML configuration files can be included in Home Assistant configuration by adding the following lines to the `configuration.yaml` file:
 
@@ -142,7 +142,6 @@ This script sets the value of the maximum charge current.
     payload_off: "false"
 #+end_src
 
-
 * EV meter
 
 ** Power [kW]
@@ -181,7 +180,6 @@ This customization is needed in order to be able to add the energy sensor to the
   sensor.mybox_meter_energy:
     device_class: energy
 #+end_src
-
 
 * Control
 
