@@ -1,0 +1,234 @@
+#+TITLE: Home Assistant definitions for MyBox wallbox
+
+This document contains annotated YAML definitions for monitoring and controlling a [[https://mybox.eco/produkty-kategorie/nabijeci-stanice/][MyBox]] wallbox in Home Assistant.
+
+The generated YAML configuration files can be included in Home Assistant configuration by adding the following lines to the `configuration.yaml` file:
+
+#+begin_src yaml
+  homeassistant:
+    customize: !include customizations.yaml
+
+  mqtt: !include mqtt.yaml
+  script: !include scripts.yaml
+#+end_src
+
+*IMPORTANT*: MQTT topics in YAML definitions use placeholders DEVICE_ID and
+ROOT_TOPIC. These have to be replaced by the actual device ID and MQTT root topic configured in [[https://cloud.mybox.pro/admin-panel/devices-management][MyBox portal]].
+
+* Configuration files
+:PROPERTIES:
+:header-args:yaml: :noweb tangle
+:END:
+
+This section specifies Home Assistant configuration files that will be tangled, and noweb references to code blocks that belong to each file.
+
+** mqtt.yaml
+
+#+begin_src yaml :tangle mqtt.yaml
+  sensor:
+    <<sensor.mybox_max_charge_current>>
+    <<sensor.mybox_evse_state>>
+    <<sensor.mybox_car_state>>
+    <<sensor.mybox_meter_power>>
+    <<sensor.mybox_meter_energy>>
+  binary_sensor:
+    <<binary_sensor.mybox_cable_locked>>
+#+end_src
+
+** scripts.yaml
+
+#+begin_src yaml :tangle scripts.yaml
+  <<script.mybox_set_max_charge_current>>
+  <<script.mybox_pause_charging>>
+  <<script.mybox_resume_charging>>
+  <<script.mybox_stop_charging>>
+#+end_src
+
+** customizations.yaml
+
+#+begin_src yaml :tangle customizations.yaml
+  <<energy meter device class>>
+#+end_src
+
+* AC module
+
+** EVSE state
+
+Possible values are ~Unplugged~, ~Plugged~, ~Charging~ and ~Paused~.
+
+#+NAME: sensor.mybox_evse_state
+#+begin_src yaml
+  - name: "MyBox EVSE state"
+    icon: "mdi:ev-station"
+    unique_id: "305537af-ce8e-4a9d-9edd-dee4aec55212"
+    state_topic: >-
+      ROOT_TOPIC/DEVICE_ID/ac-module-1-ac-module/evse-state
+#+end_src
+
+** Car state
+
+The current charging state of the EV as per IES 61851-1, see this [[https://driivz.com/blog/ev-charging-guide/][blog post]].
+
+| Value   | Meaning                                       |
+|---------+-----------------------------------------------|
+| STATE A | Standby                                       |
+| STATE B | Vehicle detected                              |
+| STATE C | Ready for charging (ventilation not required) |
+| STATE D | Ready for charging (ventilation required)     |
+| STATE E | EVSE shut off                                 |
+| STATE F | Error                                         |
+
+The difference between states *C* and *D* is that with *D* the EV requires a ventilated location such as open air wallbox. 
+
+#+NAME: sensor.mybox_car_state
+#+begin_src yaml
+  - name: "MyBox car state"
+    icon: "mdi:car-electric"
+    unique_id: "cda4fae0-10f5-4dbe-a7e5-ef6a331d3129"
+    state_topic: >-
+      ROOT_TOPIC/DEVICE_ID/ac-module-1-ac-module/car-state
+#+end_src
+
+** Maximum charge current [A]
+
+#+NAME: sensor.mybox_max_charge_current
+#+begin_src yaml
+  - name: "MyBox max charge current"
+    icon: "mdi:current-ac"
+    unique_id: "e7446234-e557-4135-9117-3b9b6db3c0df"
+    unit_of_measurement: "A"
+    state_class: measurement
+    state_topic: >-
+      ROOT_TOPIC/DEVICE_ID/ac-module-1-ac-module/max-charge-current
+#+end_src
+
+This script sets the value of the maximum charge current.
+
+#+NAME: script.mybox_set_max_charge_current
+#+begin_src yaml
+  mybox_set_max_charge_current:
+    alias: "Set the maximum charge current"
+    description: >-
+      Set the maximum charge current for MyBox.
+    icon: "mdi:current-ac"
+    fields:
+      value:
+        name: "Max charge current value"
+        selector:
+          number:
+            min: 6
+            max: 16
+            step: 1
+            unit_of_measurement: "A"
+            mode: slider
+    sequence:
+      - action: mqtt.publish
+        data:
+          topic: >-
+            ROOT_TOPIC/DEVICE_ID/ac-module-1-ac-module/max-charge-current/set
+          payload_template: "{{ value }}"
+#+end_src
+
+** Cable locked?
+
+#+NAME: binary_sensor.mybox_cable_locked
+#+begin_src yaml
+  - name: "MyBox cable locked"
+    icon: "mdi:ev-plug-type2"
+    unique_id: "f010644a-8e6f-4811-94b1-7a75fa05f7d2"
+    state_topic: >-
+      ROOT_TOPIC/DEVICE_ID/ac-module-1-ac-module/cable-locked
+    payload_on: "true"
+    payload_off: "false"
+#+end_src
+
+
+* EV meter
+
+** Power [kW]
+
+#+NAME: sensor.mybox_meter_power
+#+begin_src yaml
+  - name: "MyBox meter power"
+    icon: "mdi:ev-station"
+    unique_id: "57e6e10e-b62d-4507-9982-0fd6dd5a139a"
+    unit_of_measurement: "kW"
+    state_class: measurement
+    state_topic: >-
+      ROOT_TOPIC/DEVICE_ID/ac-module-1-ev-meter/ev-meter-power
+#+end_src
+
+** Energy [kWh]
+
+The energy meter retains its value accross device resets as well as mains power outages.
+
+#+NAME: sensor.mybox_meter_energy
+#+begin_src yaml
+  - name: "MyBox EV meter energy"
+    icon: "mdi:ev-station"
+    object_id: "mybox_meter_energy"
+    unique_id: "ff4fd070-5f35-4a67-896d-b0b73fdb06ed"
+    unit_of_measurement: "kWh"
+    state_class: total_increasing
+    state_topic: >-
+      ROOT_TOPIC/DEVICE_ID/ac-module-1-ev-meter/ev-meter-energy
+#+end_src
+
+This customization is needed in order to be able to add the energy sensor to the Home Assistant Energy dashboard.
+
+#+NAME: energy meter device class
+#+begin_src yaml
+  sensor.mybox_meter_energy:
+    device_class: energy
+#+end_src
+
+
+* Control
+
+** Pause charging
+
+#+NAME: script.mybox_pause_charging
+#+begin_src yaml
+  mybox_pause_charging:
+    alias: "Pause charging"
+    description: >-
+      Pause EV charging from MyBox.
+    mode: single
+    sequence:
+      - action: mqtt.publish
+        data:
+          topic: >-
+            ROOT_TOPIC/DEVICE_ID/ac-module-1-ac-module/pause-charging/set
+#+end_src
+
+** Resume charging
+
+#+NAME: script.mybox_resume_charging
+#+begin_src yaml
+  mybox_resume_charging:
+    alias: "Resume charging"
+    description: >-
+      Resume EV charging from MyBox.
+    mode: single
+    sequence:
+      - action: mqtt.publish
+        data:
+          topic: >-
+            ROOT_TOPIC/DEVICE_ID/ac-module-1-ac-module/resume-charging/set
+#+end_src
+
+** Stop charging
+
+#+NAME: script.mybox_stop_charging
+#+begin_src yaml
+  mybox_stop_charging:
+    alias: "Stop charging"
+    description: >-
+      Stop EV charging from MyBox.
+    mode: single
+    sequence:
+      - action: mqtt.publish
+        data:
+          topic: >-
+            ROOT_TOPIC/DEVICE_ID/ac-module-1-ac-module/stop-charging/set
+#+end_src
