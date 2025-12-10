@@ -1,0 +1,716 @@
+#+TITLE: Adaptive BEV charging with EcoVolter
+#+AUTHOR: Ladislav Lhotka
+
+This literate configuration describes my Home Assistant implementation
+of control and regulation of BEV charging with the aim to use only
+surplus PV production. I use the EcoVolter cable for this purpose
+because (unlike the MyBox wallbox) it allows for using both one and
+three phases.
+
+* Configuration files
+:PROPERTIES:
+:header-args:yaml: :noweb tangle
+:END:
+
+The following three files will be generated (“tangled”) from this Org
+file. The YAML definitions contained therein can be included in Home
+Assistant configuration files.
+
+** [[ecovolter-scripts.yaml]]
+
+#+begin_src yaml :tangle ecovolter-scripts.yaml
+  <<script.ecovolter_increase_target_current>>
+  <<script.ecovolter_decrease_target_current>>
+#+end_src
+
+** [[ecovolter-automations.yaml]]
+
+#+begin_src yaml :tangle ecovolter-automations.yaml
+  <<automation.start_regulated_charging>>
+  <<automation.resume_bev_charging>>
+  <<automation.increase_single_phase_charging>>
+  <<automation.decrease_single_phase_charging>>
+  <<automation.pause_regulated_ecovolter_charging>>
+  <<automation.switch_to_three_phase_charging>>
+  <<automation.increase_three_phase_charging>>
+  <<automation.decrease_three_phase_charging>>
+  <<automation.switch_to_single_phase_charging>>
+#+end_src
+
+** [[ecovolter-lovelace.yaml]]
+
+#+begin_src yaml :tangle ecovolter-lovelace.yaml
+  views:
+    - title: Home
+      sections:
+        - type: grid
+          cards:
+            <<heading card>>
+            - type: vertical-stack
+              cards:
+                <<power and on/off>>
+                <<target current and phases>>
+              grid_options:
+                columns: 6
+                rows: 1
+            <<gauge EcoVolter off>>
+            <<gauge single-phase below 10 A>>
+            <<gauge single-phase at 10 A>>
+            <<gauge three-phase>>
+      header:
+        card:
+          type: markdown
+          text_only: true
+          content: >-
+            # Adaptive BEV charging
+#+end_src
+
+* Sensors
+
+In order to keep track of surplus PV power and, at the same time,
+smooth out transient fluctuations in solar radiation and household
+energy usage, we use (kind of) 15-minute averages implemented with the
+following sensors:
+
+- sensor.pv_surplus_power :: keeps track of total PV production
+  reduced by current total consumption (including ESS overhead power)
+
+- sensor.accumulated_pv_surplus_power :: [[https://www.home-assistant.io/integrations/integration][integral]] of the previous sensor
+
+- sensor.quarter_hourly_delta_of_surplus_pv_energy :: (delta sensor)
+  [[https://www.home-assistant.io/integrations/utility_meter][utility meter]] with 15-minute deltas of the previous sensor.
+
+If we divided the value of the delta sensor at the end of each 15-min
+cycle by 15 minutes, we get the average power during that cycle. In
+the automations, though, we can use the delta sensor directly and
+multiply the thresholds by 15 min instead.
+
+* Thresholds and scenarios
+
+If EcoVolter is connected but charging is paused, we resume it
+automatically whenever the surplus PV production is sufficient for the
+minimum charging power of 6 A (single phase), which is 6 A × 230 V /
+1000 = 1.38 kW. The delta sensor should thus reach at least 1.38 kW ×
+15 min = 20.7 kWmin.
+
+The charging current of EcoVolter can be set between 6 A and 16 A with
+1 A increments (for both single- and three-phase charging). Since the
+goal is to minimize the use of grid power and/or energy from the ESS
+battery, we have to observe the following limitations:
+- our Victron invertors support maximum current of 10 A per phase
+- the absolute limit of PV production are around 6.5 kW, so using 10 A
+  or more with three-phase charging again means that some power is
+  taken from the battery or grid.
+
+Therefore, the maxima for single- and three-phase charging are 10 A
+and 9 A, respectively. These limits also leave enough available power
+for other appliances.
+
+Incrementing or decrementing the charging current by 1 A means a
+difference in power of ±0.23 kW for single phase and ±0.69 kW for
+three phases. This corresponds to a change of ∓3.45 and ∓10.35 kWmin,
+respectively, in our 15-min delta sensor.
+
+Switching from 10 A single phase to 6 A three phases means an increase
+of 1.84 kW in power, or -27.6 kWmin in the delta sensor.
+
+Whenever we start/resume/pause the wallbox or change the charging
+parameters, we also reset the delta sensor so that the accummulation
+starts again from zero in new circumstances.
+
+Based on the above considerations, we use 8 scenarios for regulating
+EcoVolter parameters. Each scenario defines a threshold value of the
+delta sensor (column Δ) that triggers an automation under specified
+conditions (current charging parameters). The scenarios are given in
+the following table. The numbers in the first column link to the
+definitions of the corresponding automations.
+
+#+NAME: tab.scenarios
+#+CAPTION: Control scenarios
+| # | current [A] | phases | Δ [kWmin] | action                      |
+|---+-------------+--------+-----------+-----------------------------|
+| / |           < |        |         < | <                           |
+|   |         <r> |        |           |                             |
+| [[automation.spust_nabijeni_bev][1]] |           0 |        |        21 | resume at 6 A single phase  |
+| [[automation.zvysit_jednofazove_nabijeni][2]] |         6–9 |      1 |       3.5 | increase current by 1 A     |
+| [[automation.snizit_jednofazove_nabijeni][3]] |        7–10 |      1 |      -3.5 | decrease current by 1 A     |
+| [[automation.pause_regulated_ecovolter_charging][4]] |           6 |      1 |      -3.5 | pause charging              |
+| [[automation.prepni_na_trifazove_nabijeni][5]] |          10 |      1 |        28 | switch to 6 A three phases  |
+| [[automation.zvysit_trifazove_nabijeni][6]] |         6–8 |      3 |      10.5 | increase current by 1 A     |
+| [[automation.snizit_trifazove_nabijeni][7]] |         7–9 |      3 |     -10.5 | decrease current by 1 A     |
+| [[automation.prepni_na_jednofazove_nabijeni][8]] |           6 |      3 |     -10.5 | switch to 10 A single phase |
+
+* Scripts
+
+The following two helper scripts are used later in automations
+realizing scenarios #2, #3, #6 and #7. They increase/decrease charging
+current by 1 A (observing the lower and upper bounds of 6 and 16 amps,
+respectively), and also reset the delta sensor:
+
+#+NAME: script.ecovolter_increase_target_current
+#+begin_src yaml
+  ecovolter_increase_target_current:
+    alias: "Ecovolter increase target current"
+    sequence:
+      - action: rest_command.set_target_current
+        data:
+          value: >-
+            {{ [states('sensor.ecovolter_target_current') | int + 1, 16]
+            | min }}
+      - action: utility_meter.reset
+        target:
+          entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+    description: "Increase target current by 1 A."
+    icon: mdi:current-ac
+#+end_src
+
+#+NAME: script.ecovolter_decrease_target_current
+#+begin_src yaml
+  ecovolter_decrease_target_current:
+    alias: "Ecovolter decrease target current"
+    sequence:
+      - action: rest_command.set_target_current
+        data:
+          value: >-
+            {{ [states('sensor.ecovolter_target_current') | int - 1, 6]
+            | max }}
+      - action: utility_meter.reset
+        target:
+          entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+    description: "Decrease target current by 1 A."
+    icon: mdi:current-ac
+#+end_src
+
+* Automations
+:PROPERTIES:
+:header-args: :tangle ecovolter-automations.yaml
+:END:
+
+A charging session with automatic power regulation is normally
+initiated by plugging in the EcoVolter connector. The following
+automation is triggered at this moment provided that EcoVolter is
+located at home. It does two things:
+
+1. Clear the delta sensor.
+
+2. If the ESS battery SoC is above 90%, the photovoltaic power may
+   already be throttled, so we also set charging parameters to 3
+   phases and 7 A in order to iterate to to maximum PV power that's
+   currently available.
+
+#+NAME: automation.start_regulated_charging
+#+begin_src yaml
+  - id: "72e90037-128a-427d-bd94-49a22897c5ce"
+    alias: "Start regulated charging"
+    description: >-
+      When regulated charging starts, reset the average PV surplus
+      power sensor.
+    triggers:
+      - trigger: state
+        entity_id:
+          - sensor.ecovolter_charging_status
+        from: IDLE
+        to:
+          - CONNECTED
+          - CHARGING
+        for:
+          hours: 0
+          minutes: 0
+          seconds: 5
+    conditions:
+      - condition: state
+        entity_id: device_tracker.ecovolter
+        state: home
+    actions:
+      - action: utility_meter.reset
+        target:
+          entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+      - condition: numeric_state
+        entity_id: sensor.ess_battery_soc
+        above: 90
+      - action: rest_command.set_phases
+        data:
+          single: "false"
+      - action: rest_command.set_target_current
+        data:
+          value: 7
+    mode: single
+#+end_src
+
+The following automations then realize the individual scenarios from
+[[tab.scenarios]]. This one is for scenario #1:
+
+#+NAME: automation.resume_bev_charging
+#+begin_src yaml
+  - id: "eb1e0025-22f7-4fb4-b15e-e0c39450dcde"
+    alias: "Resume BEV charging"
+    description: >-
+      Start/resume BEV charging if there is sufficient PV production
+      surplus and the cable is connected.
+    triggers:
+      - trigger: numeric_state
+        entity_id:
+          - sensor.quarter_hourly_delta_of_surplus_pv_energy
+        above: 21
+    conditions:
+      - condition: state
+        entity_id: device_tracker.ecovolter
+        state: home
+      - condition: state
+        entity_id: sensor.ecovolter_charging_status
+        state: CONNECTED
+    actions:
+      - action: rest_command.set_phases
+        data:
+          single: "true"
+      - action: rest_command.set_target_current
+        data:
+          value: 6
+      - action: rest_command.enable_charging
+      - action: utility_meter.reset
+        target:
+          entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+    mode: single
+#+end_src
+
+The following automation realizes scenario #2.
+
+#+NAME: automation.increase_single_phase_charging
+#+begin_src yaml
+  - id: "6c6af610-16c9-4c53-80bc-d5ba2f2b7696"
+    alias: "Increase single-phase charging"
+    description: >-
+      Increase single-phase charging current by 1 A if there is
+      sufficient PV production surplus.
+    triggers:
+      - trigger: numeric_state
+        entity_id:
+          - sensor.quarter_hourly_delta_of_surplus_pv_energy
+        above: 3.5
+    conditions:
+      - condition: state
+        entity_id: device_tracker.ecovolter
+        state: home
+      - condition: state
+        entity_id: sensor.ecovolter_charging_status
+        state: CHARGING
+      - condition: state
+        entity_id: binary_sensor.ecovolter_single_phase
+        state: "on"
+      - condition: numeric_state
+        entity_id: sensor.ecovolter_target_current
+        below: 10
+    actions:
+      - action: script.ecovolter_increase_target_current
+    mode: single
+#+end_src
+
+The following automation realizes scenario #3.
+
+#+NAME: automation.decrease_single_phase_charging
+#+begin_src yaml
+  - id: "07762216-2c2d-4d10-b32d-ec79fade89ae"
+    alias: "Decrease single-phase charging"
+    description: >-
+      Decrease single-phase charging current by 1 A if the PV production
+      deficit becomes too high.
+    triggers:
+      - trigger: numeric_state
+        entity_id:
+          - sensor.quarter_hourly_delta_of_surplus_pv_energy
+        below: -3.5
+    conditions:
+      - condition: state
+        entity_id: device_tracker.ecovolter
+        state: home
+      - condition: state
+        entity_id: sensor.ecovolter_charging_status
+        state: CHARGING
+      - condition: state
+        entity_id: binary_sensor.ecovolter_single_phase
+        state: "on"
+      - condition: numeric_state
+        alias: "Lze nabíjecí proud ještě snížit?"
+        entity_id: sensor.ecovolter_target_current
+        above: 6
+    actions:
+      - action: script.ecovolter_decrease_target_current
+    mode: single
+#+end_src
+
+The following automation realizes scenario #4.
+
+#+NAME: automation.pause_regulated_ecovolter_charging
+#+begin_src yaml
+  - id: "0cdbf08c-db6b-49f4-b454-364b4ad84fd9"
+    alias: "Pause regulated EcoVolter charging"
+    description: >-
+      Pause charging if the PV production deficit becomes too high.
+    triggers:
+      - trigger: numeric_state
+        entity_id:
+          - sensor.quarter_hourly_delta_of_surplus_pv_energy
+        below: -3.5
+    conditions:
+      - condition: state
+        entity_id: device_tracker.ecovolter
+        state: home
+      - condition: state
+        entity_id: sensor.ecovolter_charging_status
+        state: CHARGING
+      - condition: state
+        entity_id: binary_sensor.ecovolter_single_phase
+        state: "on"
+      - condition: numeric_state
+        alias: "Jsme na minimu nabíjecího proudu?"
+        entity_id: sensor.ecovolter_target_current
+        below: 7
+    actions:
+      - action: rest_command.disable_charging
+      - action: utility_meter.reset
+        target:
+          entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+    mode: single
+#+end_src
+
+The following automation realizes scenario #5.
+
+#+NAME: automation.switch_to_three_phase_charging
+#+begin_src yaml
+  - id: "d206e594-221b-4d8d-a4f2-050c34261b10"
+    alias: "Switch to three-phase charging"
+    description: >-
+      Switch to three-phase charging if there is sufficient PV production
+      surplus.
+    triggers:
+      - trigger: numeric_state
+        entity_id:
+          - sensor.quarter_hourly_delta_of_surplus_pv_energy
+        above: 28
+    conditions:
+      - condition: state
+        entity_id: device_tracker.ecovolter
+        state: home
+      - condition: state
+        entity_id: sensor.ecovolter_charging_status
+        state: CHARGING
+      - condition: state
+        entity_id: binary_sensor.ecovolter_single_phase
+        state: "on"
+      - condition: numeric_state
+        entity_id: sensor.ecovolter_target_current
+        above: 9
+    actions:
+      - action: rest_command.set_phases
+        data:
+          single: "false"
+      - action: rest_command.set_target_current
+        data:
+          value: 6
+      - action: utility_meter.reset
+        target:
+          entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+    mode: single
+#+end_src
+
+The following automation realizes scenario #6:
+
+#+NAME: automation.increase_three_phase_charging
+#+begin_src yaml
+  - id: "0c88f635-6889-4d38-ab3d-ab9e826d7875"
+    alias: "Increase three-phase charging"
+    description: >-
+      Increase three-phase charging current by 1 A if ther eis sufficient
+      PV production surplus.
+    triggers:
+      - trigger: numeric_state
+        entity_id:
+          - sensor.quarter_hourly_delta_of_surplus_pv_energy
+        above: 10.5
+    conditions:
+      - condition: state
+        entity_id: device_tracker.ecovolter
+        state: home
+      - condition: state
+        entity_id: sensor.ecovolter_charging_status
+        state: CHARGING
+      - condition: state
+        entity_id: binary_sensor.ecovolter_single_phase
+        state: "off"
+      - condition: numeric_state
+        entity_id: sensor.ecovolter_target_current
+        below: 9
+    actions:
+      - action: script.ecovolter_increase_target_current
+    mode: single
+#+end_src
+
+The following automation realizes scenario #7:
+
+#+NAME: automation.decrease_three_phase_charging
+#+begin_src yaml
+  - id: "4d36cbd4-eb99-4450-a7c1-fcf4d7847042"
+    alias: "Decrease three-phase charging"
+    description: >-
+      Decrease three-phase charging current by 1 A if the PV production
+      deficit becomes too high.
+    triggers:
+      - trigger: numeric_state
+        entity_id:
+          - sensor.quarter_hourly_delta_of_surplus_pv_energy
+        below: -10.5
+    conditions:
+      - condition: state
+        entity_id: device_tracker.ecovolter
+        state: home
+      - condition: state
+        entity_id: sensor.ecovolter_charging_status
+        state: CHARGING
+      - condition: state
+        entity_id: binary_sensor.ecovolter_single_phase
+        state: "off"
+      - condition: numeric_state
+        entity_id: sensor.ecovolter_target_current
+        above: 6
+    actions:
+      - action: script.ecovolter_decrease_target_current
+    mode: single
+#+end_src
+
+Finally, the following automation realizes scenario #8.
+
+#+NAME: automation.switch_to_single_phase_charging
+#+begin_src yaml
+  - id: "baab9d25-883b-4045-a2a9-246b1d7f024d"
+    alias: "Switch to single-phase charging"
+    description: >-
+      Switch to single-phase charging if the PV production deficit
+      becomes too high.
+    triggers:
+      - trigger: numeric_state
+        entity_id:
+          - sensor.quarter_hourly_delta_of_surplus_pv_energy
+        below: -10.5
+    conditions:
+      - condition: state
+        entity_id: device_tracker.ecovolter
+        state: home
+      - condition: state
+        entity_id: sensor.ecovolter_charging_status
+        state: CHARGING
+      - condition: state
+        entity_id: binary_sensor.ecovolter_single_phase
+        state: "off"
+      - condition: numeric_state
+        entity_id: sensor.ecovolter_target_current
+        below: 7
+    actions:
+      - action: rest_command.set_phases
+        data:
+          single: "true"
+      - action: rest_command.set_target_current
+        data:
+          value: 10
+      - action: utility_meter.reset
+        target:
+          entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+    mode: single
+#+end_src
+
+* Dashboard
+
+This section contains YAML configuration of a simple Lovelace
+dashboard containing just one sections with cards that I set up for
+monitoring and control of adaptive charging using the EcoVolter
+portable wallbox. In practice, I have this section embedded in more
+complex dashboards. Moreover, in my dashboards this section has
+conditional visibility – it's displayed only if EcoVolter is at home
+and connected to a BEV charging port.
+
+First comes the heading card that also shows the actual charging
+current and the daily energy consumption.
+
+#+NAME: heading card
+#+begin_src yaml
+  - type: heading
+    heading_style: title
+    heading: EcoVolter
+    icon: mdi:ev-station
+    badges:
+      - type: entity
+        entity: sensor.ecovolter_charging_current
+      - type: entity
+        entity: sensor.ecovolter_daily_energy
+#+end_src
+
+In the left half of the section there is a vertical stack with two
+cards. The upper card shows the charging power and also contains a
+button that can be used for turning EcoVolter on and off.
+
+#+NAME: power and on/off
+#+begin_src yaml
+  - type: custom:bubble-card
+    card_type: button
+    button_type: state
+    entity: sensor.ecovolter_current_charging_power
+    name: Výkon
+    icon: mdi:ev-plug-type2
+    sub_button:
+      - entity: binary_sensor.ecovolter_charging_enabled
+        icon: mdi:power-standby
+        tap_action:
+          action: perform-action
+          perform_action: script.toggle_ecovolter_charging_enabled
+          target: {}
+    card_layout: large
+    styles: ""
+    scrolling_effect: false
+#+end_src
+
+The bottom card in the vertical stack is a slider bubble card. It can
+be used for setting the target current and the number of phases used
+for charging, the latter by pressing the button on the right.
+
+#+NAME: target current and phases
+#+begin_src yaml
+  - type: custom:bubble-card
+    card_type: button
+    button_type: slider
+    entity: input_number.ecovolter_target_current
+    name: Proud
+    show_state: true
+    sub_button:
+      - entity: binary_sensor.ecovolter_single_phase
+        icon: ""
+        tap_action:
+          action: perform-action
+          perform_action: script.toggle_ecovolter_single_phase
+          target: {}
+        state_background: false
+        show_background: true
+    styles: >-
+      ${subButtonIcon[0].setAttribute("icon",
+      hass.states['binary_sensor.ecovolter_single_phase'].state
+      === 'on' ? 'mdi:numeric-1' : 'mdi:numeric-3')}
+    card_layout: large
+    show_icon: false
+#+end_src
+
+On the right we have a gauge card showing the 15-minute accumulated
+power balance. Four cards are configured corresponding to different
+thresholds for decreasing and increasing the charging power. The
+visibility conditions are set so that only one card is displayed at
+any time. The first card is displayed if the EcoVolter wallbox isn't
+charging:
+
+#+NAME: gauge EcoVolter off
+#+begin_src yaml
+  - type: gauge
+    entity: sensor.quarter_hourly_delta_of_surplus_pv_energy
+    name: 15’ bilance
+    unit: kWmin
+    min: -30
+    max: 30
+    needle: true
+    grid_options:
+      columns: 6
+      rows: 2
+    segments:
+      - from: -30
+        color: red
+      - from: 21
+        color: green
+    visibility:
+      - condition: state
+        entity: binary_sensor.ecovolter_charging_state
+        state_not: "on"
+#+end_src
+
+Next comes the card for single-phase charging with target current less
+than 10 A:
+
+#+NAME: gauge single-phase below 10 A
+#+begin_src yaml
+  - type: gauge
+    entity: sensor.quarter_hourly_delta_of_surplus_pv_energy
+    name: 15’ bilance
+    unit: kWmin
+    min: -30
+    max: 30
+    needle: true
+    grid_options:
+      columns: 6
+      rows: 2
+    severity:
+      green: 3.5
+      yellow: -3.5
+      red: -30
+    visibility:
+      - condition: state
+        entity: sensor.ecovolter_charging_status
+        state: CHARGING
+      - condition: state
+        entity: binary_sensor.ecovolter_single_phase
+        state: "on"
+      - condition: numeric_state
+        entity: sensor.ecovolter_target_current
+        below: 10
+#+end_src
+
+And this card is for single-phase charging with the target current
+exactly at 10 A:
+
+#+NAME: gauge single-phase at 10 A
+#+begin_src yaml
+  - type: gauge
+    entity: sensor.quarter_hourly_delta_of_surplus_pv_energy
+    name: 15’ bilance
+    unit: kWmin
+    min: -30
+    max: 30
+    needle: true
+    grid_options:
+      columns: 6
+      rows: 2
+    severity:
+      green: 28
+      yellow: -3.5
+      red: -30
+    visibility:
+      - condition: state
+        entity: sensor.ecovolter_charging_status
+        state: CHARGING
+      - condition: state
+        entity: binary_sensor.ecovolter_single_phase
+        state: "on"
+      - condition: numeric_state
+        entity: sensor.ecovolter_target_current
+        above: 9
+#+end_src
+
+Finally, the last gauge card is for three-phase charging:
+
+#+NAME: gauge three-phase
+#+begin_src yaml
+  - type: gauge
+    entity: sensor.quarter_hourly_delta_of_surplus_pv_energy
+    name: 15’ bilance
+    unit: kWmin
+    min: -30
+    max: 30
+    needle: true
+    grid_options:
+      columns: 6
+      rows: 2
+    severity:
+      green: 10.5
+      yellow: -10.5
+      red: -30
+    visibility:
+      - condition: state
+        entity: sensor.ecovolter_charging_status
+        state: CHARGING
+      - condition: state
+        entity: binary_sensor.ecovolter_single_phase
+        state: "off"
+#+end_src

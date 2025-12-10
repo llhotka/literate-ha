@@ -1,0 +1,26 @@
+ecovolter_increase_target_current:
+  alias: "Ecovolter increase target current"
+  sequence:
+    - action: rest_command.set_target_current
+      data:
+        value: >-
+          {{ [states('sensor.ecovolter_target_current') | int + 1, 16]
+          | min }}
+    - action: utility_meter.reset
+      target:
+        entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+  description: "Increase target current by 1 A."
+  icon: mdi:current-ac
+ecovolter_decrease_target_current:
+  alias: "Ecovolter decrease target current"
+  sequence:
+    - action: rest_command.set_target_current
+      data:
+        value: >-
+          {{ [states('sensor.ecovolter_target_current') | int - 1, 6]
+          | max }}
+    - action: utility_meter.reset
+      target:
+        entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+  description: "Decrease target current by 1 A."
+  icon: mdi:current-ac

@@ -1,0 +1,150 @@
+views:
+  - title: Home
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading_style: title
+            heading: EcoVolter
+            icon: mdi:ev-station
+            badges:
+              - type: entity
+                entity: sensor.ecovolter_charging_current
+              - type: entity
+                entity: sensor.ecovolter_daily_energy
+          - type: vertical-stack
+            cards:
+              - type: custom:bubble-card
+                card_type: button
+                button_type: state
+                entity: sensor.ecovolter_current_charging_power
+                name: Výkon
+                icon: mdi:ev-plug-type2
+                sub_button:
+                  - entity: binary_sensor.ecovolter_charging_enabled
+                    icon: mdi:power-standby
+                    tap_action:
+                      action: perform-action
+                      perform_action: script.toggle_ecovolter_charging_enabled
+                      target: {}
+                card_layout: large
+                styles: ""
+                scrolling_effect: false
+              - type: custom:bubble-card
+                card_type: button
+                button_type: slider
+                entity: input_number.ecovolter_target_current
+                name: Proud
+                show_state: true
+                sub_button:
+                  - entity: binary_sensor.ecovolter_single_phase
+                    icon: ""
+                    tap_action:
+                      action: perform-action
+                      perform_action: script.toggle_ecovolter_single_phase
+                      target: {}
+                    state_background: false
+                    show_background: true
+                styles: >-
+                  ${subButtonIcon[0].setAttribute("icon",
+                  hass.states['binary_sensor.ecovolter_single_phase'].state
+                  === 'on' ? 'mdi:numeric-1' : 'mdi:numeric-3')}
+                card_layout: large
+                show_icon: false
+            grid_options:
+              columns: 6
+              rows: 1
+          - type: gauge
+            entity: sensor.quarter_hourly_delta_of_surplus_pv_energy
+            name: 15’ bilance
+            unit: kWmin
+            min: -30
+            max: 30
+            needle: true
+            grid_options:
+              columns: 6
+              rows: 2
+            segments:
+              - from: -30
+                color: red
+              - from: 21
+                color: green
+            visibility:
+              - condition: state
+                entity: binary_sensor.ecovolter_charging_state
+                state_not: "on"
+          - type: gauge
+            entity: sensor.quarter_hourly_delta_of_surplus_pv_energy
+            name: 15’ bilance
+            unit: kWmin
+            min: -30
+            max: 30
+            needle: true
+            grid_options:
+              columns: 6
+              rows: 2
+            severity:
+              green: 3.5
+              yellow: -3.5
+              red: -30
+            visibility:
+              - condition: state
+                entity: sensor.ecovolter_charging_status
+                state: CHARGING
+              - condition: state
+                entity: binary_sensor.ecovolter_single_phase
+                state: "on"
+              - condition: numeric_state
+                entity: sensor.ecovolter_target_current
+                below: 10
+          - type: gauge
+            entity: sensor.quarter_hourly_delta_of_surplus_pv_energy
+            name: 15’ bilance
+            unit: kWmin
+            min: -30
+            max: 30
+            needle: true
+            grid_options:
+              columns: 6
+              rows: 2
+            severity:
+              green: 28
+              yellow: -3.5
+              red: -30
+            visibility:
+              - condition: state
+                entity: sensor.ecovolter_charging_status
+                state: CHARGING
+              - condition: state
+                entity: binary_sensor.ecovolter_single_phase
+                state: "on"
+              - condition: numeric_state
+                entity: sensor.ecovolter_target_current
+                above: 9
+          - type: gauge
+            entity: sensor.quarter_hourly_delta_of_surplus_pv_energy
+            name: 15’ bilance
+            unit: kWmin
+            min: -30
+            max: 30
+            needle: true
+            grid_options:
+              columns: 6
+              rows: 2
+            severity:
+              green: 10.5
+              yellow: -10.5
+              red: -30
+            visibility:
+              - condition: state
+                entity: sensor.ecovolter_charging_status
+                state: CHARGING
+              - condition: state
+                entity: binary_sensor.ecovolter_single_phase
+                state: "off"
+    header:
+      card:
+        type: markdown
+        text_only: true
+        content: >-
+          # Adaptive BEV charging

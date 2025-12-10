@@ -1,0 +1,541 @@
+- id: "72e90037-128a-427d-bd94-49a22897c5ce"
+  alias: "Start regulated charging"
+  description: >-
+    When regulated charging starts, reset the average PV surplus
+    power sensor.
+  triggers:
+    - trigger: state
+      entity_id:
+        - sensor.ecovolter_charging_status
+      from: IDLE
+      to:
+        - CONNECTED
+        - CHARGING
+      for:
+        hours: 0
+        minutes: 0
+        seconds: 5
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+  actions:
+    - action: utility_meter.reset
+      target:
+        entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+    - condition: numeric_state
+      entity_id: sensor.ess_battery_soc
+      above: 90
+    - action: rest_command.set_phases
+      data:
+        single: "false"
+    - action: rest_command.set_target_current
+      data:
+        value: 7
+  mode: single
+- id: "eb1e0025-22f7-4fb4-b15e-e0c39450dcde"
+  alias: "Resume BEV charging"
+  description: >-
+    Start/resume BEV charging if there is sufficient PV production
+    surplus and the cable is connected.
+  triggers:
+    - trigger: numeric_state
+      entity_id:
+        - sensor.quarter_hourly_delta_of_surplus_pv_energy
+      above: 21
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+    - condition: state
+      entity_id: sensor.ecovolter_charging_status
+      state: CONNECTED
+  actions:
+    - action: rest_command.set_phases
+      data:
+        single: "true"
+    - action: rest_command.set_target_current
+      data:
+        value: 6
+    - action: rest_command.enable_charging
+    - action: utility_meter.reset
+      target:
+        entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+  mode: single
+- id: "6c6af610-16c9-4c53-80bc-d5ba2f2b7696"
+  alias: "Increase single-phase charging"
+  description: >-
+    Increase single-phase charging current by 1 A if there is
+    sufficient PV production surplus.
+  triggers:
+    - trigger: numeric_state
+      entity_id:
+        - sensor.quarter_hourly_delta_of_surplus_pv_energy
+      above: 3.5
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+    - condition: state
+      entity_id: sensor.ecovolter_charging_status
+      state: CHARGING
+    - condition: state
+      entity_id: binary_sensor.ecovolter_single_phase
+      state: "on"
+    - condition: numeric_state
+      entity_id: sensor.ecovolter_target_current
+      below: 10
+  actions:
+    - action: script.ecovolter_increase_target_current
+  mode: single
+- id: "07762216-2c2d-4d10-b32d-ec79fade89ae"
+  alias: "Decrease single-phase charging"
+  description: >-
+    Decrease single-phase charging current by 1 A if the PV production
+    deficit becomes too high.
+  triggers:
+    - trigger: numeric_state
+      entity_id:
+        - sensor.quarter_hourly_delta_of_surplus_pv_energy
+      below: -3.5
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+    - condition: state
+      entity_id: sensor.ecovolter_charging_status
+      state: CHARGING
+    - condition: state
+      entity_id: binary_sensor.ecovolter_single_phase
+      state: "on"
+    - condition: numeric_state
+      alias: "Lze nabíjecí proud ještě snížit?"
+      entity_id: sensor.ecovolter_target_current
+      above: 6
+  actions:
+    - action: script.ecovolter_decrease_target_current
+  mode: single
+- id: "0cdbf08c-db6b-49f4-b454-364b4ad84fd9"
+  alias: "Pause regulated EcoVolter charging"
+  description: >-
+    Pause charging if the PV production deficit becomes too high.
+  triggers:
+    - trigger: numeric_state
+      entity_id:
+        - sensor.quarter_hourly_delta_of_surplus_pv_energy
+      below: -3.5
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+    - condition: state
+      entity_id: sensor.ecovolter_charging_status
+      state: CHARGING
+    - condition: state
+      entity_id: binary_sensor.ecovolter_single_phase
+      state: "on"
+    - condition: numeric_state
+      alias: "Jsme na minimu nabíjecího proudu?"
+      entity_id: sensor.ecovolter_target_current
+      below: 7
+  actions:
+    - action: rest_command.disable_charging
+    - action: utility_meter.reset
+      target:
+        entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+  mode: single
+- id: "d206e594-221b-4d8d-a4f2-050c34261b10"
+  alias: "Switch to three-phase charging"
+  description: >-
+    Switch to three-phase charging if there is sufficient PV production
+    surplus.
+  triggers:
+    - trigger: numeric_state
+      entity_id:
+        - sensor.quarter_hourly_delta_of_surplus_pv_energy
+      above: 28
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+    - condition: state
+      entity_id: sensor.ecovolter_charging_status
+      state: CHARGING
+    - condition: state
+      entity_id: binary_sensor.ecovolter_single_phase
+      state: "on"
+    - condition: numeric_state
+      entity_id: sensor.ecovolter_target_current
+      above: 9
+  actions:
+    - action: rest_command.set_phases
+      data:
+        single: "false"
+    - action: rest_command.set_target_current
+      data:
+        value: 6
+    - action: utility_meter.reset
+      target:
+        entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+  mode: single
+- id: "0c88f635-6889-4d38-ab3d-ab9e826d7875"
+  alias: "Increase three-phase charging"
+  description: >-
+    Increase three-phase charging current by 1 A if ther eis sufficient
+    PV production surplus.
+  triggers:
+    - trigger: numeric_state
+      entity_id:
+        - sensor.quarter_hourly_delta_of_surplus_pv_energy
+      above: 10.5
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+    - condition: state
+      entity_id: sensor.ecovolter_charging_status
+      state: CHARGING
+    - condition: state
+      entity_id: binary_sensor.ecovolter_single_phase
+      state: "off"
+    - condition: numeric_state
+      entity_id: sensor.ecovolter_target_current
+      below: 9
+  actions:
+    - action: script.ecovolter_increase_target_current
+  mode: single
+- id: "4d36cbd4-eb99-4450-a7c1-fcf4d7847042"
+  alias: "Decrease three-phase charging"
+  description: >-
+    Decrease three-phase charging current by 1 A if the PV production
+    deficit becomes too high.
+  triggers:
+    - trigger: numeric_state
+      entity_id:
+        - sensor.quarter_hourly_delta_of_surplus_pv_energy
+      below: -10.5
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+    - condition: state
+      entity_id: sensor.ecovolter_charging_status
+      state: CHARGING
+    - condition: state
+      entity_id: binary_sensor.ecovolter_single_phase
+      state: "off"
+    - condition: numeric_state
+      entity_id: sensor.ecovolter_target_current
+      above: 6
+  actions:
+    - action: script.ecovolter_decrease_target_current
+  mode: single
+- id: "baab9d25-883b-4045-a2a9-246b1d7f024d"
+  alias: "Switch to single-phase charging"
+  description: >-
+    Switch to single-phase charging if the PV production deficit
+    becomes too high.
+  triggers:
+    - trigger: numeric_state
+      entity_id:
+        - sensor.quarter_hourly_delta_of_surplus_pv_energy
+      below: -10.5
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+    - condition: state
+      entity_id: sensor.ecovolter_charging_status
+      state: CHARGING
+    - condition: state
+      entity_id: binary_sensor.ecovolter_single_phase
+      state: "off"
+    - condition: numeric_state
+      entity_id: sensor.ecovolter_target_current
+      below: 7
+  actions:
+    - action: rest_command.set_phases
+      data:
+        single: "true"
+    - action: rest_command.set_target_current
+      data:
+        value: 10
+    - action: utility_meter.reset
+      target:
+        entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+  mode: single
+
+- id: "72e90037-128a-427d-bd94-49a22897c5ce"
+  alias: "Start regulated charging"
+  description: >-
+    When regulated charging starts, reset the average PV surplus
+    power sensor.
+  triggers:
+    - trigger: state
+      entity_id:
+        - sensor.ecovolter_charging_status
+      from: IDLE
+      to:
+        - CONNECTED
+        - CHARGING
+      for:
+        hours: 0
+        minutes: 0
+        seconds: 5
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+  actions:
+    - action: utility_meter.reset
+      target:
+        entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+    - condition: numeric_state
+      entity_id: sensor.ess_battery_soc
+      above: 90
+    - action: rest_command.set_phases
+      data:
+        single: "false"
+    - action: rest_command.set_target_current
+      data:
+        value: 7
+  mode: single
+
+- id: "eb1e0025-22f7-4fb4-b15e-e0c39450dcde"
+  alias: "Resume BEV charging"
+  description: >-
+    Start/resume BEV charging if there is sufficient PV production
+    surplus and the cable is connected.
+  triggers:
+    - trigger: numeric_state
+      entity_id:
+        - sensor.quarter_hourly_delta_of_surplus_pv_energy
+      above: 21
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+    - condition: state
+      entity_id: sensor.ecovolter_charging_status
+      state: CONNECTED
+  actions:
+    - action: rest_command.set_phases
+      data:
+        single: "true"
+    - action: rest_command.set_target_current
+      data:
+        value: 6
+    - action: rest_command.enable_charging
+    - action: utility_meter.reset
+      target:
+        entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+  mode: single
+
+- id: "6c6af610-16c9-4c53-80bc-d5ba2f2b7696"
+  alias: "Increase single-phase charging"
+  description: >-
+    Increase single-phase charging current by 1 A if there is
+    sufficient PV production surplus.
+  triggers:
+    - trigger: numeric_state
+      entity_id:
+        - sensor.quarter_hourly_delta_of_surplus_pv_energy
+      above: 3.5
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+    - condition: state
+      entity_id: sensor.ecovolter_charging_status
+      state: CHARGING
+    - condition: state
+      entity_id: binary_sensor.ecovolter_single_phase
+      state: "on"
+    - condition: numeric_state
+      entity_id: sensor.ecovolter_target_current
+      below: 10
+  actions:
+    - action: script.ecovolter_increase_target_current
+  mode: single
+
+- id: "07762216-2c2d-4d10-b32d-ec79fade89ae"
+  alias: "Decrease single-phase charging"
+  description: >-
+    Decrease single-phase charging current by 1 A if the PV production
+    deficit becomes too high.
+  triggers:
+    - trigger: numeric_state
+      entity_id:
+        - sensor.quarter_hourly_delta_of_surplus_pv_energy
+      below: -3.5
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+    - condition: state
+      entity_id: sensor.ecovolter_charging_status
+      state: CHARGING
+    - condition: state
+      entity_id: binary_sensor.ecovolter_single_phase
+      state: "on"
+    - condition: numeric_state
+      alias: "Lze nabíjecí proud ještě snížit?"
+      entity_id: sensor.ecovolter_target_current
+      above: 6
+  actions:
+    - action: script.ecovolter_decrease_target_current
+  mode: single
+
+- id: "0cdbf08c-db6b-49f4-b454-364b4ad84fd9"
+  alias: "Pause regulated EcoVolter charging"
+  description: >-
+    Pause charging if the PV production deficit becomes too high.
+  triggers:
+    - trigger: numeric_state
+      entity_id:
+        - sensor.quarter_hourly_delta_of_surplus_pv_energy
+      below: -3.5
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+    - condition: state
+      entity_id: sensor.ecovolter_charging_status
+      state: CHARGING
+    - condition: state
+      entity_id: binary_sensor.ecovolter_single_phase
+      state: "on"
+    - condition: numeric_state
+      alias: "Jsme na minimu nabíjecího proudu?"
+      entity_id: sensor.ecovolter_target_current
+      below: 7
+  actions:
+    - action: rest_command.disable_charging
+    - action: utility_meter.reset
+      target:
+        entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+  mode: single
+
+- id: "d206e594-221b-4d8d-a4f2-050c34261b10"
+  alias: "Switch to three-phase charging"
+  description: >-
+    Switch to three-phase charging if there is sufficient PV production
+    surplus.
+  triggers:
+    - trigger: numeric_state
+      entity_id:
+        - sensor.quarter_hourly_delta_of_surplus_pv_energy
+      above: 28
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+    - condition: state
+      entity_id: sensor.ecovolter_charging_status
+      state: CHARGING
+    - condition: state
+      entity_id: binary_sensor.ecovolter_single_phase
+      state: "on"
+    - condition: numeric_state
+      entity_id: sensor.ecovolter_target_current
+      above: 9
+  actions:
+    - action: rest_command.set_phases
+      data:
+        single: "false"
+    - action: rest_command.set_target_current
+      data:
+        value: 6
+    - action: utility_meter.reset
+      target:
+        entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+  mode: single
+
+- id: "0c88f635-6889-4d38-ab3d-ab9e826d7875"
+  alias: "Increase three-phase charging"
+  description: >-
+    Increase three-phase charging current by 1 A if ther eis sufficient
+    PV production surplus.
+  triggers:
+    - trigger: numeric_state
+      entity_id:
+        - sensor.quarter_hourly_delta_of_surplus_pv_energy
+      above: 10.5
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+    - condition: state
+      entity_id: sensor.ecovolter_charging_status
+      state: CHARGING
+    - condition: state
+      entity_id: binary_sensor.ecovolter_single_phase
+      state: "off"
+    - condition: numeric_state
+      entity_id: sensor.ecovolter_target_current
+      below: 9
+  actions:
+    - action: script.ecovolter_increase_target_current
+  mode: single
+
+- id: "4d36cbd4-eb99-4450-a7c1-fcf4d7847042"
+  alias: "Decrease three-phase charging"
+  description: >-
+    Decrease three-phase charging current by 1 A if the PV production
+    deficit becomes too high.
+  triggers:
+    - trigger: numeric_state
+      entity_id:
+        - sensor.quarter_hourly_delta_of_surplus_pv_energy
+      below: -10.5
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+    - condition: state
+      entity_id: sensor.ecovolter_charging_status
+      state: CHARGING
+    - condition: state
+      entity_id: binary_sensor.ecovolter_single_phase
+      state: "off"
+    - condition: numeric_state
+      entity_id: sensor.ecovolter_target_current
+      above: 6
+  actions:
+    - action: script.ecovolter_decrease_target_current
+  mode: single
+
+- id: "baab9d25-883b-4045-a2a9-246b1d7f024d"
+  alias: "Switch to single-phase charging"
+  description: >-
+    Switch to single-phase charging if the PV production deficit
+    becomes too high.
+  triggers:
+    - trigger: numeric_state
+      entity_id:
+        - sensor.quarter_hourly_delta_of_surplus_pv_energy
+      below: -10.5
+  conditions:
+    - condition: state
+      entity_id: device_tracker.ecovolter
+      state: home
+    - condition: state
+      entity_id: sensor.ecovolter_charging_status
+      state: CHARGING
+    - condition: state
+      entity_id: binary_sensor.ecovolter_single_phase
+      state: "off"
+    - condition: numeric_state
+      entity_id: sensor.ecovolter_target_current
+      below: 7
+  actions:
+    - action: rest_command.set_phases
+      data:
+        single: "true"
+    - action: rest_command.set_target_current
+      data:
+        value: 10
+    - action: utility_meter.reset
+      target:
+        entity_id: sensor.quarter_hourly_delta_of_surplus_pv_energy
+  mode: single
