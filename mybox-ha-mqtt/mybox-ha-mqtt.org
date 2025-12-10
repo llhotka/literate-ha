@@ -1,26 +1,19 @@
 #+TITLE: Home Assistant definitions for MyBox wallbox
+#+AUTHOR: Ladislav Lhotka
 
 This document contains annotated YAML definitions for monitoring and controlling a [[https://mybox.eco/produkty-kategorie/nabijeci-stanice/][MyBox]] wallbox in Home Assistant. Details can be found in this [[https://blog.lhotka.name/posts/mybox-home-assistant/][blog post]].
-
-The generated YAML configuration files can be included in Home Assistant configuration by adding the following lines to the `configuration.yaml` file:
-
-#+begin_src yaml
-  homeassistant:
-    customize: !include customizations.yaml
-
-  mqtt: !include mqtt.yaml
-  script: !include scripts.yaml
-#+end_src
-
-*IMPORTANT*: MQTT topics in YAML definitions use placeholders DEVICE_ID and
-ROOT_TOPIC. These have to be replaced by the actual device ID and MQTT root topic configured in [[https://cloud.mybox.pro/admin-panel/devices-management][MyBox portal]].
 
 * Configuration files
 :PROPERTIES:
 :header-args:yaml: :noweb tangle
 :END:
 
-This section specifies Home Assistant configuration files that will be tangled, and noweb references to code blocks that belong to each file.
+The following three files will be generated (“tangled”) from this Org
+file. The YAML definitions contained therein can be included in Home
+Assistant configuration files.
+
+*IMPORTANT*: MQTT topics in YAML definitions use placeholders DEVICE_ID and
+ROOT_TOPIC. These have to be replaced by the actual device ID and MQTT root topic configured in [[https://cloud.mybox.pro/admin-panel/devices-management][MyBox portal]].
 
 ** mqtt.yaml
 
