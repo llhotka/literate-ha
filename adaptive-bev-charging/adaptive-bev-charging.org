@@ -5,7 +5,7 @@ This literate configuration describes my Home Assistant implementation
 of control and regulation of BEV charging with the aim to use only
 surplus PV production. I use the EcoVolter cable for this purpose
 because (unlike the MyBox wallbox) it allows for using both one and
-three phases.
+three phases. See also my [[https://blog.lhotka.name/posts/adaptive-bev-charging][blog post]].
 
 * Configuration files
 :PROPERTIES:
