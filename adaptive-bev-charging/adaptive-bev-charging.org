@@ -1,7 +1,8 @@
 #+TITLE: Adaptive BEV charging with EcoVolter
 #+AUTHOR: Ladislav Lhotka
 
-This literate configuration describes my Home Assistant implementation
+This [literate configuration](https://blog.lhotka.name/posts/literate-ha-config)
+describes my Home Assistant implementation
 of control and regulation of BEV charging with the aim to use only
 surplus PV production. I use the EcoVolter cable for this purpose
 because (unlike the MyBox wallbox) it allows for using both one and
