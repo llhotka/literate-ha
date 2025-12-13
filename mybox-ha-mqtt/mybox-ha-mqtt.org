@@ -1,7 +1,9 @@
 #+TITLE: Home Assistant definitions for MyBox wallbox
 #+AUTHOR: Ladislav Lhotka
 
-This document contains annotated YAML definitions for monitoring and controlling a [[https://mybox.eco/produkty-kategorie/nabijeci-stanice/][MyBox]] wallbox in Home Assistant. Details can be found in this [[https://blog.lhotka.name/posts/mybox-home-assistant/][blog post]].
+This document contains [literate configuration](https://blog.lhotka.name/posts/literate-ha-config) for monitoring and controlling
+a [[https://mybox.eco/produkty-kategorie/nabijeci-stanice/][MyBox]] wallbox in
+Home Assistant. Details can be found in this [[https://blog.lhotka.name/posts/mybox-home-assistant/][blog post]].
 
 * Configuration files
 :PROPERTIES:
